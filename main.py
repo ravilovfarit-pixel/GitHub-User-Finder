@@ -1,102 +1,161 @@
+
 import tkinter as tk
-from tkinter import messagebox
-import requests
+from tkinter import ttk, messagebox
 import json
 import os
-import re
+from datetime import datetime
 
-# Файл для хранения избранных
-FAVORITES_FILE = 'favorites.json'
+# Имя файла для сохранения данных
+DATA_FILE = "weather_data.json"
 
-class GitHubUserFinder:
+class WeatherDiaryApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("GitHub User Finder")
-        self.root.geometry("400x550")
+        self.root.title("Weather Diary (Дневник погоды)")
+        self.root.geometry("800x450")
 
-        # 1. Поле ввода
-        tk.Label(root, text="Введите имя пользователя:").pack(pady=5)
-        self.search_entry = tk.Entry(root, width=30)
-        self.search_entry.pack(pady=5)
+        self.data = self.load_data()
 
-        # Кнопка поиска
-        tk.Button(root, text="Найти", command=self.search_users).pack(pady=5)
-
-        # 2. Список результатов
-        tk.Label(root, text="Результаты:").pack(pady=5)
-        self.results_list = tk.Listbox(root, width=50, height=10)
-        self.results_list.pack(pady=10, padx=10)
-
-        # 3. Кнопка добавления в избранное
-        tk.Button(root, text="Добавить в избранное", command=self.add_to_favorites, bg="#e1e1e1").pack(pady=5)
-
-    def search_users(self):
-        query = self.search_entry.get().strip()
+        # --- Интерфейс (Пункт 1) ---
         
-        # Валидация: пустое поле и допустимые символы (для GitHub это латиница, цифры и дефис)
-        if not query:
-            messagebox.showwarning("Внимание", "Поле поиска не должно быть пустым")
-            return
-        
-        if not re.match(r"^[a-zA-Z0-9-]*$", query):
-            messagebox.showwarning("Ошибка ввода", "Используйте только латиницу, цифры и дефис")
-            return
+        # Левая панель для ввода данных
+        input_frame = ttk.LabelFrame(root, text="Добавить новую запись")
+        input_frame.pack(side="left", fill="y", padx=10, pady=10)
 
-        self.results_list.delete(0, tk.END)
+        ttk.Label(input_frame, text="Дата (ГГГГ-ММ-ДД):").pack(anchor="w", padx=5)
+        self.date_entry = ttk.Entry(input_frame)
+        self.date_entry.pack(fill="x", padx=5, pady=2)
+        # Установка текущей даты по умолчанию
+        self.date_entry.insert(0, datetime.now().strftime("%Y-%m-%d"))
+
+        ttk.Label(input_frame, text="Температура (°C):").pack(anchor="w", padx=5)
+        self.temp_entry = ttk.Entry(input_frame)
+        self.temp_entry.pack(fill="x", padx=5, pady=2)
+
+        ttk.Label(input_frame, text="Описание погоды:").pack(anchor="w", padx=5)
+        self.desc_entry = ttk.Entry(input_frame)
+        self.desc_entry.pack(fill="x", padx=5, pady=2)
+
+        self.precip_var = tk.BooleanVar()
+        ttk.Checkbutton(input_frame, text="Осадки (есть/нет)", variable=self.precip_var).pack(anchor="w", padx=5, pady=5)
+
+        # Кнопка добавления (Пункт 2)
+        ttk.Button(input_frame, text="Добавить запись", command=self.add_entry).pack(fill="x", padx=5, pady=10)
+
+        # Секция фильтрации (Пункт 3)
+        filter_frame = ttk.LabelFrame(input_frame, text="Фильтрация")
+        filter_frame.pack(fill="x", padx=5, pady=5)
+
+        ttk.Label(filter_frame, text="Дата:").pack(anchor="w")
+        self.filter_date = ttk.Entry(filter_frame)
+        self.filter_date.pack(fill="x", pady=2)
+
+        ttk.Label(filter_frame, text="Мин. темп (+10 и т.д.):").pack(anchor="w")
+        self.filter_temp = ttk.Entry(filter_frame)
+        self.filter_temp.pack(fill="x", pady=2)
+
+        ttk.Button(filter_frame, text="Применить фильтр", command=self.update_table).pack(fill="x", pady=5)
+        ttk.Button(filter_frame, text="Сбросить фильтры", command=self.reset_filters).pack(fill="x")
+
+        # Правая панель для таблицы (Пункт 2)
+        table_frame = ttk.Frame(root)
+        table_frame.pack(side="right", fill="both", expand=True, padx=10, pady=10)
+
+        columns = ("date", "temp", "desc", "precip")
+        self.tree = ttk.Treeview(table_frame, columns=columns, show="headings")
+        self.tree.heading("date", text="Дата")
+        self.tree.heading("temp", text="Темп. (°C)")
+        self.tree.heading("desc", text="Описание")
+        self.tree.heading("precip", text="Осадки")
         
+        self.tree.column("temp", width=80)
+        self.tree.column("precip", width=80)
+        self.tree.pack(fill="both", expand=True)
+
+        self.update_table()
+
+    # --- Функционал ---
+
+    def add_entry(self):
+        # Проверка корректности (Пункт 5)
+        date_str = self.date_entry.get().strip()
+        temp_str = self.temp_entry.get().strip()
+        desc = self.desc_entry.get().strip()
+        precip = "Да" if self.precip_var.get() else "Нет"
+
         try:
-            # ИСПРАВЛЕНО: правильный URL API для поиска пользователей
-            url = f"https://github.com{query}"
-            response = requests.get(url, timeout=10)
-            
-            if response.status_code == 200:
-                data = response.json()
-                users = data.get('items', [])
-                
-                if not users:
-                    self.results_list.insert(tk.END, "Пользователи не найдены")
-                else:
-                    for user in users:
-                        self.results_list.insert(tk.END, user['login'])
-            
-            elif response.status_code == 403:
-                messagebox.showerror("Лимит запросов", "Превышен лимит запросов API. Подождите немного.")
-            else:
-                messagebox.showerror("Ошибка API", f"Ошибка сервера: {response.status_code}")
-                
-        except requests.exceptions.RequestException as e:
-            messagebox.showerror("Ошибка сети", "Проверьте интернет-соединение")
-
-    def add_to_favorites(self):
-        selected = self.results_list.get(tk.ACTIVE)
-        
-        # Проверка, что выбрано имя пользователя, а не сообщение об ошибке
-        if not selected or selected == "Пользователи не найдены":
-            messagebox.showwarning("Выбор", "Сначала выберите пользователя из списка")
+            datetime.strptime(date_str, "%Y-%m-%d")
+        except ValueError:
+            messagebox.showerror("Ошибка", "Дата должна быть в формате ГГГГ-ММ-ДД")
             return
 
-        favorites = []
-        
-        # ИСПРАВЛЕНО: Безопасное чтение JSON с обработкой исключений
         try:
-            if os.path.exists(FAVORITES_FILE):
-                with open(FAVORITES_FILE, 'r', encoding='utf-8') as f:
-                    favorites = json.load(f)
-        except (json.JSONDecodeError, IOError):
-            favorites = [] # Если файл поврежден, начинаем со пустого списка
+            temp = float(temp_str)
+        except ValueError:
+            messagebox.showerror("Ошибка", "Температура должна быть числом")
+            return
 
-        if selected not in favorites:
-            favorites.append(selected)
-            try:
-                with open(FAVORITES_FILE, 'w', encoding='utf-8') as f:
-                    json.dump(favorites, f, indent=4, ensure_ascii=False)
-                messagebox.showinfo("Успех", f"{selected} добавлен в избранное")
-            except IOError as e:
-                messagebox.showerror("Ошибка записи", f"Не удалось сохранить файл: {e}")
-        else:
-            messagebox.showinfo("Инфо", "Пользователь уже в списке")
+        if not desc:
+            messagebox.showerror("Ошибка", "Описание не должно быть пустым")
+            return
+
+        new_entry = {
+            "date": date_str,
+            "temp": temp,
+            "desc": desc,
+            "precip": precip
+        }
+
+        self.data.append(new_entry)
+        self.save_data() # Сохранение в JSON (Пункт 4)
+        self.update_table()
+        
+        # Очистка полей после ввода
+        self.temp_entry.delete(0, tk.END)
+        self.desc_entry.delete(0, tk.END)
+
+    def update_table(self):
+        # Очистка таблицы
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+
+        f_date = self.filter_date.get().strip()
+        f_temp = self.filter_temp.get().strip()
+
+        for entry in self.data:
+            # Логика фильтрации (Пункт 3)
+            if f_date and entry["date"] != f_date:
+                continue
+            if f_temp:
+                try:
+                    if entry["temp"] < float(f_temp):
+                        continue
+                except ValueError:
+                    pass
+
+            self.tree.insert("", tk.END, values=(entry["date"], entry["temp"], entry["desc"], entry["precip"]))
+
+    def reset_filters(self):
+        self.filter_date.delete(0, tk.END)
+        self.filter_temp.delete(0, tk.END)
+        self.update_table()
+
+    def save_data(self):
+        """Пункт 4: Сохранение записей в JSON"""
+        with open(DATA_FILE, "w", encoding="utf-8") as f:
+            json.dump(self.data, f, ensure_ascii=False, indent=4)
+
+    def load_data(self):
+        """Пункт 4: Загрузка данных из JSON"""
+        if os.path.exists(DATA_FILE):
+            with open(DATA_FILE, "r", encoding="utf-8") as f:
+                try:
+                    return json.load(f)
+                except json.JSONDecodeError:
+                    return []
+        return []
 
 if __name__ == "__main__":
     root = tk.Tk()
-    app = GitHubUserFinder(root)
+    app = WeatherDiaryApp(root)
     root.mainloop()
